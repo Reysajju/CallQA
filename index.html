@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CallQA - Transcribe Audio</title>
+    <link rel="stylesheet" href="static/css/style.css">
+    <script src="static/js/script.js"></script>
+    <style>
+        /* Styles for the loading animation */
+        .loading-spinner {
+            border: 8px solid #f3f3f3; /* Light grey */
+            border-top: 8px solid #3498db; /* Blue */
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto; /* Center the spinner */
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Hide download button by default */
+        #downloadBtn {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Welcome to CallQA</h1>
+    <p>Upload Audio to transcribe:</p>
+    <form id="uploadForm" enctype="multipart/form-data">
+        <input type="file" name="file" id="audioFile" accept="audio/*" required>
+        <input type="submit" value="Transcribe">
+    </form>
+    <div id="loadingSpinner" class="loading-spinner" style="display: none;"></div>
+    
+    <div id="transcriptionResult"></div>
+
+    <!-- Download button for transcription -->
+    <a id="downloadBtn" download="transcription.txt" href="#" style="display: none;">Download Transcription</a>
+
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', function(event) {
+            event.preventDefault(); // Prevent the form from submitting normally
+            
+            // Show loading animation
+            document.getElementById('loadingSpinner').style.display = 'block';
+            
+            var formData = new FormData(this);
+
+            // Send a POST request to the server to transcribe the audio
+            fetch('/transcribe', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.text())
+            .then(result => {
+                // Hide loading animation
+                document.getElementById('loadingSpinner').style.display = 'none';
+                
+                // Display transcription result
+                document.getElementById('transcriptionResult').innerText = result;
+
+                // Show download button
+                document.getElementById('downloadBtn').style.display = 'inline-block';
+                // Set download link
+                document.getElementById('downloadBtn').href = 'data:text/plain;charset=utf-8,' + encodeURIComponent(result);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                // Hide loading animation
+                document.getElementById('loadingSpinner').style.display = 'none';
+            });
+        });
+    </script>
+</body>
+</html>

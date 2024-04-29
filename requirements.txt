@@ -1,3 +1,2 @@
-Flask
-Werkzeug
-vosk
+Flask==2.0.2
+whisper

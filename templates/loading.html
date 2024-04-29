@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loading</title>
+    <style>
+        /* Define keyframes for pulsating animation */
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Apply pulsating animation to button */
+.button {
+  background-color: #4CAF50; /* Green */
+  border: none;
+  color: white;
+  padding: 15px 32px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+  font-size: 16px;
+  margin: 4px 2px;
+  cursor: pointer;
+  border-radius: 8px;
+  animation: pulse 2s infinite; /* Apply the pulsating animation */
+}
+
+/* Responsive design for button */
+@media only screen and (max-width: 600px) {
+  .button {
+    padding: 10px 20px; /* Adjust padding for smaller screens */
+    font-size: 14px; /* Decrease font size for smaller screens */
+  }
+}
+
+@media only screen and (max-width: 400px) {
+  .button {
+    padding: 8px 16px; /* Further adjust padding for even smaller screens */
+    font-size: 12px; /* Further decrease font size for even smaller screens */
+  }
+}
+
+    </style>
+</head>
+<body>
+    <h1>Loading...</h1>
+</body>
+</html>

@@ -7,6 +7,13 @@ export interface TranscriptionItem {
   department?: string;
   topic?: string;
   sharedWith?: string[];
+  duration?: string;
+  fileSize?: string;
+  processingSteps?: {
+    stage: string;
+    status: 'pending' | 'processing' | 'completed' | 'error';
+    progress?: number;
+  }[];
 }
 
 export interface UserSettings {

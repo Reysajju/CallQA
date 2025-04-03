@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { FileAudio, Upload, FileText, Trash2, User, X } from 'lucide-react';
+import { FileAudio, Upload, FileText, Trash2, User, X, Phone } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { transcribeAudio, analyzeTranscription } from './lib/gemini';
 import { LoadingSpinner } from './components/LoadingSpinner';
 import { History } from './components/History';
 import { TranscriptionItem, UserSettings } from './types';
+import toast from 'react-hot-toast';
 
 function App() {
   const [file, setFile] = useState<File | null>(null);
@@ -19,9 +20,16 @@ function App() {
   const [settings, setSettings] = useState<UserSettings>({
     name: '',
     sopQuestions: [
-      'What are the main topics discussed?',
-      'Are there any action items mentioned?',
-      'What are the key decisions made?'
+      'What are the main topics discussed in the call?',
+      'What are the key action items or next steps mentioned?',
+      'Are there any specific customer requirements or pain points discussed?',
+      'What solutions or products were proposed during the call?',
+      'Were there any objections raised, and how were they addressed?',
+      'What is the overall sentiment of the conversation?',
+      'Are there any follow-up tasks or commitments made?',
+      'Were any deadlines or important dates mentioned?',
+      'What are the key decision points discussed?',
+      'Are there any compliance or regulatory concerns mentioned?'
     ]
   });
 
@@ -62,17 +70,10 @@ function App() {
     maxFiles: 1
   });
 
-  const simulateProgress = () => {
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += 5;
-      setLoadingProgress(progress);
-      setTimeRemaining(((100 - progress) / 5) * 0.5); // Rough estimate
-      if (progress >= 95) {
-        clearInterval(interval);
-      }
-    }, 500);
-    return () => clearInterval(interval);
+  const updateProgress = (stage: string, progress: number) => {
+    setLoadingStage(stage);
+    setLoadingProgress(progress);
+    setTimeRemaining(((100 - progress) / 5) * 0.5);
   };
 
   const handleUpload = async () => {
@@ -80,46 +81,60 @@ function App() {
 
     setLoading(true);
     setError(null);
-    setLoadingStage('Preparing audio file');
-    const cleanup = simulateProgress();
+    
+    const processingSteps = [
+      { stage: 'Preparing audio file', status: 'pending' },
+      { stage: 'Transcribing audio', status: 'pending' },
+      { stage: 'Analyzing content', status: 'pending' }
+    ];
 
     try {
+      // Step 1: Prepare audio
+      updateProgress('Preparing audio file', 0);
       const reader = new FileReader();
       const audioContent = await new Promise<string>((resolve, reject) => {
         reader.onload = () => resolve(reader.result as string);
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
+      updateProgress('Preparing audio file', 100);
 
-      setLoadingStage('Transcribing audio');
+      // Step 2: Transcribe
+      updateProgress('Transcribing audio', 0);
       const transcription = await transcribeAudio(audioContent);
+      updateProgress('Transcribing audio', 100);
       
-      setLoadingStage('Analyzing content');
+      // Step 3: Analyze
+      updateProgress('Analyzing content', 0);
       const analysisResults = await analyzeTranscription(transcription, settings.sopQuestions);
+      updateProgress('Analyzing content', 100);
 
       const newTranscription: TranscriptionItem = {
         id: Date.now().toString(),
         fileName: file.name,
         transcription,
         analysis: analysisResults,
-        date: new Date().toLocaleString()
+        date: new Date().toLocaleString(),
+        duration: '00:00', // This would be calculated from actual audio duration
+        fileSize: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+        processingSteps
       };
 
       const updatedTranscriptions = [newTranscription, ...transcriptions];
       saveToLocalStorage(updatedTranscriptions);
       setSelectedItem(newTranscription);
       
-      cleanup();
-      setLoadingProgress(100);
+      toast.success('Audio processed successfully!');
+      
       setTimeout(() => {
         setLoading(false);
         setLoadingProgress(0);
         setLoadingStage('');
       }, 500);
     } catch (error) {
-      cleanup();
       console.error('Error processing file:', error);
       setError(error instanceof Error ? error.message : 'An unexpected error occurred. Please try again.');
+      toast.error('Failed to process audio file');
     } finally {
       setFile(null);
     }
@@ -131,6 +146,7 @@ function App() {
     if (selectedItem?.id === id) {
       setSelectedItem(null);
     }
+    toast.success('Transcription deleted');
   };
 
   const addSopQuestion = () => {
@@ -164,7 +180,10 @@ function App() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
       <div className="bg-white shadow-sm">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-900">Audio Transcription AI</h1>
+          <div className="flex items-center gap-2">
+            <Phone className="w-8 h-8 text-blue-600" />
+            <h1 className="text-2xl font-bold text-gray-900">CallQA</h1>
+          </div>
           <button
             onClick={() => setShowSettings(true)}
             className="p-2 hover:bg-gray-100 rounded-full transition-colors"
@@ -204,7 +223,7 @@ function App() {
               <div>
                 <div className="flex justify-between items-center mb-2">
                   <label className="block text-sm font-medium text-gray-700">
-                    SOP Questions
+                    Analysis Questions
                   </label>
                   <button
                     onClick={addSopQuestion}
@@ -221,7 +240,7 @@ function App() {
                         value={question}
                         onChange={(e) => updateSopQuestion(index, e.target.value)}
                         className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="Enter SOP question"
+                        placeholder="Enter analysis question"
                       />
                       <button
                         onClick={() => deleteSopQuestion(index)}
@@ -252,7 +271,7 @@ function App() {
 
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8 text-center">
-          <p className="text-gray-600">Upload your audio files for instant transcription and analysis</p>
+          <p className="text-gray-600">Upload your audio files for instant transcription and AI-powered analysis</p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -350,24 +369,30 @@ function App() {
               <div className="bg-white rounded-lg shadow-lg p-6">
                 <div className="mb-6">
                   <h2 className="text-2xl font-bold text-gray-900 mb-2">{selectedItem.fileName}</h2>
-                  <p className="text-sm text-gray-500">{selectedItem.date}</p>
+                  <div className="flex gap-4 text-sm text-gray-500">
+                    <span>{selectedItem.date}</span>
+                    {selectedItem.duration && <span>Duration: {selectedItem.duration}</span>}
+                    {selectedItem.fileSize && <span>Size: {selectedItem.fileSize}</span>}
+                  </div>
                 </div>
 
                 <div className="space-y-6">
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 mb-3">Transcription</h3>
                     <div className="bg-gray-50 rounded-lg p-4">
-                      <p className="text-gray-700 whitespace-pre-wrap">{selectedItem.transcription}</p>
+                      <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">
+                        {selectedItem.transcription}
+                      </p>
                     </div>
                   </div>
 
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 mb-3">Analysis</h3>
-                    <div className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
                       {settings.sopQuestions.map((question, index) => (
                         <div key={index} className="bg-gray-50 rounded-lg p-4">
                           <p className="font-medium text-gray-900 mb-2">{question}</p>
-                          <p className="text-gray-700">{selectedItem.analysis[index]}</p>
+                          <p className="text-gray-700 leading-relaxed">{selectedItem.analysis[index]}</p>
                         </div>
                       ))}
                     </div>

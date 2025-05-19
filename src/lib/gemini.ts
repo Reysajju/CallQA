@@ -6,7 +6,7 @@ export async function transcribeAudio(audioContent: string): Promise<string> {
   try {
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     
-    const prompt = `Please transcribe this audio content and format it with proper punctuation and paragraphs. If you can't process the audio directly, please let me know.`;
+    const prompt = `Please transcribe this audio content and format it with proper punctuation and paragraphs and heighlight the speakers by name if mentioned otherwise speaker A and B. Also catagorize the transcription in bold heading paragraphs. If you can't process the audio directly, please let me know.`;
     
     const result = await model.generateContent([
       prompt,

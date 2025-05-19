@@ -24,12 +24,8 @@ function App() {
       'What are the key action items or next steps mentioned?',
       'Are there any specific customer requirements or pain points discussed?',
       'What solutions or products were proposed during the call?',
-      'Were there any objections raised, and how were they addressed?',
-      'What is the overall sentiment of the conversation?',
-      'Are there any follow-up tasks or commitments made?',
-      'Were any deadlines or important dates mentioned?',
-      'What are the key decision points discussed?',
-      'Are there any compliance or regulatory concerns mentioned?'
+      'Were there any objections raised, and how were they addressed?'
+      '
     ]
   });
 

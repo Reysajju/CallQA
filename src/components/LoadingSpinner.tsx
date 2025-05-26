@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { CheckCircle, Circle, Clock } from 'lucide-react';
 
 interface LoadingSpinnerProps {
@@ -8,6 +8,34 @@ interface LoadingSpinnerProps {
 }
 
 export function LoadingSpinner({ progress, stage, timeRemaining }: LoadingSpinnerProps) {
+  const [currentProgress, setCurrentProgress] = useState(progress || 0);
+  const [timeLeft, setTimeLeft] = useState(timeRemaining || 0);
+
+  useEffect(() => {
+    let progressInterval: NodeJS.Timeout;
+    let timeInterval: NodeJS.Timeout;
+
+    if (stage) {
+      // Simulate realistic progress updates
+      progressInterval = setInterval(() => {
+        setCurrentProgress(prev => {
+          const increment = Math.random() * 2; // Random increment between 0-2
+          return Math.min(prev + increment, progress || 100);
+        });
+      }, 200);
+
+      // Update time remaining
+      timeInterval = setInterval(() => {
+        setTimeLeft(prev => Math.max(0, prev - 1));
+      }, 1000);
+    }
+
+    return () => {
+      clearInterval(progressInterval);
+      clearInterval(timeInterval);
+    };
+  }, [stage, progress]);
+
   const stages = [
     'Preparing audio file',
     'Transcribing audio',
@@ -20,9 +48,9 @@ export function LoadingSpinner({ progress, stage, timeRemaining }: LoadingSpinne
     <div className="flex flex-col items-center justify-center p-8 space-y-6">
       <div className="relative">
         <div className="w-20 h-20 border-4 border-blue-200 rounded-full animate-spin border-t-blue-600"></div>
-        {progress !== undefined && (
+        {currentProgress !== undefined && (
           <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-lg font-semibold text-blue-600">
-            {Math.round(progress)}%
+            {Math.round(currentProgress)}%
           </div>
         )}
       </div>
@@ -31,10 +59,10 @@ export function LoadingSpinner({ progress, stage, timeRemaining }: LoadingSpinne
         <div className="w-full max-w-md">
           <div className="text-center mb-4">
             <p className="text-lg font-semibold text-gray-900">{stage}</p>
-            {timeRemaining !== undefined && (
+            {timeLeft > 0 && (
               <p className="text-sm text-gray-500 flex items-center justify-center gap-1 mt-1">
                 <Clock className="w-4 h-4" />
-                Estimated time remaining: {Math.ceil(timeRemaining)}s
+                Estimated time remaining: {Math.ceil(timeLeft)}s
               </p>
             )}
           </div>
@@ -76,12 +104,12 @@ export function LoadingSpinner({ progress, stage, timeRemaining }: LoadingSpinne
         </div>
       )}
       
-      {progress !== undefined && (
+      {currentProgress !== undefined && (
         <div className="w-full max-w-md">
           <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
             <div 
               className="h-full bg-blue-600 transition-all duration-300 ease-out"
-              style={{ width: `${progress}%` }}
+              style={{ width: `${currentProgress}%` }}
             ></div>
           </div>
         </div>

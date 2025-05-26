@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Gemini Call Analyzer",
+  "version": "0.1",
+  "description": "Transcribe, summarize, and analyze call recordings using Gemini API.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "src/service_worker.js"
+  },
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "16": "src/icon16.png",
+      "48": "src/icon48.png",
+      "128": "src/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content_script.js"]
+    }
+  ],
+  "options_page": "src/options.html",
+  "icons": {
+    "16": "src/icon16.png",
+    "48": "src/icon48.png",
+    "128": "src/icon128.png"
+  }
+}

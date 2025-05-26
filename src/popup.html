@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Gemini Call Analyzer</title>
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; width: 400px; background: #f7f9fa; }
+    #top-bar { display: flex; justify-content: flex-end; align-items: center; padding: 10px 18px 0 0; }
+    .icon-btn { background: none; border: none; cursor: pointer; margin-left: 10px; font-size: 18px; color: #0078d7; transition: color 0.2s; }
+    .icon-btn:hover { color: #005fa3; }
+    #drop-area { border: 2px dashed #0078d7; border-radius: 10px; padding: 36px 0; text-align: center; margin: 28px 24px 20px 24px; background: #e9f1fb; color: #0078d7; cursor: pointer; transition: border-color 0.2s, background 0.2s; box-shadow: 0 2px 8px #0001; }
+    #drop-area.dragover { border-color: #005fa3; background: #d0e7fa; }
+    #loading { display: none; text-align: center; margin: 20px; color: #0078d7; font-size: 18px; }
+    #tabs { display: flex; border-bottom: 1px solid #ddd; margin: 0 0 10px 0; }
+    .tab { flex: 1; padding: 12px 0; text-align: center; cursor: pointer; background: #e9ecef; color: #333; border: none; outline: none; font-weight: 500; transition: background 0.2s; }
+    .tab.active { background: #fff; color: #0078d7; border-bottom: 2px solid #0078d7; }
+    .tab-content { display: none; padding: 18px 20px 10px 20px; background: #fff; border-radius: 0 0 8px 8px; min-height: 120px; }
+    .tab-content.active { display: block; }
+    #settings-section { margin: 10px 20px 0 20px; }
+    .question-row { display: flex; align-items: center; margin-bottom: 6px; }
+    .question-row input { flex: 1; margin-right: 6px; }
+    .remove-q { background: #e57373; color: #fff; border: none; border-radius: 3px; padding: 2px 7px; cursor: pointer; }
+    .add-q { background: #0078d7; color: #fff; border: none; border-radius: 3px; padding: 4px 10px; cursor: pointer; margin-top: 8px; }
+    #save-qs { background: #43a047; color: #fff; border: none; border-radius: 3px; padding: 6px 16px; cursor: pointer; margin-top: 10px; float: right; }
+    #chat-messages { max-height: 120px; overflow-y: auto; margin-bottom: 10px; }
+    .chat-msg { margin-bottom: 8px; }
+    .chat-user { color: #0078d7; font-weight: 500; }
+    .chat-bot { color: #333; }
+    #chat-input-row { display: flex; }
+    #chat-input { flex: 1; padding: 6px; border-radius: 4px; border: 1px solid #ccc; }
+    #chat-send { background: #0078d7; color: #fff; border: none; border-radius: 4px; padding: 6px 14px; margin-left: 6px; cursor: pointer; }
+    .icon-btn svg { vertical-align: middle; }
+  </style>
+</head>
+<body>
+  <div id="top-bar">
+    <button id="history-btn" class="icon-btn" title="History">
+      <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9"/><polyline points="3 7 3 12 8 12"/></svg>
+    </button>
+    <button id="settings-btn" class="icon-btn" title="Settings">
+      <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 5 15.4a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 5 8.6a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 8 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 16 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.31.22.65.22 1v.09A1.65 1.65 0 0 0 21 12z"/></svg>
+    </button>
+  </div>
+  <div id="drop-area">
+    <p>Drag & drop audio file here<br>or<br><input type="file" id="file-input" accept="audio/*"></p>
+  </div>
+  <div id="loading">Processing audio...</div>
+  <div id="tabs" style="display:none;">
+    <button class="tab active" data-tab="transcription">Transcription</button>
+    <button class="tab" data-tab="summary">Summary</button>
+    <button class="tab" data-tab="qa">Q&A</button>
+    <button class="tab" data-tab="chat">Chat</button>
+    <button class="tab" data-tab="settings">Settings</button>
+  </div>
+  <div id="tab-contents">
+    <div id="transcription" class="tab-content active"></div>
+    <div id="summary" class="tab-content"></div>
+    <div id="qa" class="tab-content"></div>
+    <div id="chat" class="tab-content">
+      <div id="chat-messages"></div>
+      <div id="chat-input-row">
+        <input id="chat-input" type="text" placeholder="Ask about the call..." />
+        <button id="chat-send">Send</button>
+      </div>
+    </div>
+    <div id="settings" class="tab-content">
+      <div id="settings-section">
+        <h4>Preset Questions</h4>
+        <div id="questions-list"></div>
+        <button class="add-q">+ Add Question</button>
+        <button id="save-qs">Save</button>
+      </div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

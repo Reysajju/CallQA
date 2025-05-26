@@ -1,19 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { FileAudio, Upload, FileText, Trash2, Phone, ChevronDown, ChevronUp, Clock, AlertCircle, UserCircle, Settings } from 'lucide-react';
+import { FileAudio, Upload, FileText, Trash2, Phone, ChevronDown, ChevronUp, Clock, AlertCircle, Settings } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { transcribeAudio, analyzeTranscription, chatWithTranscription } from './lib/gemini';
 import { LoadingSpinner } from './components/LoadingSpinner';
 import { TranscriptionItem } from './types';
 import { ThemeToggle } from './components/ThemeToggle';
-import { AuthModal } from './components/AuthModal';
-import { UserMenu } from './components/UserMenu';
 import toast from 'react-hot-toast';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL!,
-  import.meta.env.VITE_SUPABASE_ANON_KEY!
-);
 
 function App() {
   const [file, setFile] = useState<File | null>(null);
@@ -27,8 +19,6 @@ function App() {
   const [chatMessage, setChatMessage] = useState('');
   const [chatHistory, setChatHistory] = useState<{ question: string; answer: string }[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
-  const [user, setUser] = useState<any>(null);
-  const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [presetQuestions, setPresetQuestions] = useState<string[]>([
     'What are the main topics discussed?',
@@ -46,33 +36,21 @@ function App() {
   });
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
+    const savedTranscriptions = localStorage.getItem('transcriptions');
+    if (savedTranscriptions) {
+      setTranscriptions(JSON.parse(savedTranscriptions));
+    }
 
     // Load saved preset questions
     const savedQuestions = localStorage.getItem('presetQuestions');
     if (savedQuestions) {
       setPresetQuestions(JSON.parse(savedQuestions));
     }
-
-    return () => subscription.unsubscribe();
   }, []);
 
   const createMarkup = (content: string) => {
     return { __html: content };
   };
-
-  useEffect(() => {
-    const savedTranscriptions = localStorage.getItem('transcriptions');
-    if (savedTranscriptions) {
-      setTranscriptions(JSON.parse(savedTranscriptions));
-    }
-  }, []);
 
   const toggleSection = (sectionId: string) => {
     setExpandedSections(prev => ({
@@ -122,12 +100,6 @@ function App() {
       setError(null);
       setChatHistory([]);
       
-      const processingSteps = [
-        { stage: 'Preparing audio file', status: 'pending' },
-        { stage: 'Transcribing audio', status: 'pending' },
-        { stage: 'Analyzing content', status: 'pending' }
-      ];
-
       updateProgress('Preparing audio file', 0);
       const reader = new FileReader();
       const audioContent = await new Promise<string>((resolve, reject) => {
@@ -159,8 +131,7 @@ function App() {
         analysis: analysisResults.analysis || [],
         date: new Date().toLocaleString(),
         duration: duration,
-        fileSize: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
-        processingSteps
+        fileSize: `${(file.size / (1024 * 1024)).toFixed(2)} MB`
       };
 
       const updatedTranscriptions = [newTranscription, ...transcriptions];
@@ -209,15 +180,6 @@ function App() {
     toast.success('Transcription deleted');
   };
 
-  const handleSignOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      toast.error('Failed to sign out');
-    } else {
-      toast.success('Signed out successfully');
-    }
-  };
-
   const addPresetQuestion = () => {
     const newQuestions = [...presetQuestions, ''];
     setPresetQuestions(newQuestions);
@@ -255,17 +217,6 @@ function App() {
             >
               <Settings className="w-5 h-5 text-gray-600 dark:text-gray-300" />
             </button>
-            {user ? (
-              <UserMenu user={user} onSignOut={handleSignOut} />
-            ) : (
-              <button
-                onClick={() => setShowAuthModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <UserCircle className="w-5 h-5" />
-                Sign In
-              </button>
-            )}
             <ThemeToggle />
           </div>
         </div>
@@ -649,14 +600,6 @@ function App() {
           </div>
         )}
       </div>
-
-      {showAuthModal && (
-        <AuthModal
-          isOpen={showAuthModal}
-          onClose={() => setShowAuthModal(false)}
-          onSuccess={() => setShowAuthModal(false)}
-        />
-      )}
     </div>
   );
 }

@@ -77,6 +77,28 @@ async function retryWithBackoff<T>(fn: () => Promise<T>, retries = 3, delay = 10
   throw new Error('All retries failed');
 }
 
+// Helper function to process items sequentially with delay
+async function processSequentially<T, R>(
+  items: T[],
+  processor: (item: T) => Promise<R>,
+  delayMs: number = 2000
+): Promise<R[]> {
+  const results: R[] = [];
+  for (const item of items) {
+    try {
+      const result = await processor(item);
+      results.push(result);
+      if (items.indexOf(item) < items.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    } catch (error) {
+      console.error(`Error processing item:`, error);
+      results.push('Unable to process this item due to rate limiting. Please try again later.' as R);
+    }
+  }
+  return results;
+}
+
 export async function analyzeTranscription(transcription: string, questions: string[]): Promise<{
   summary: string;
   timestampedTranscription: Array<{
@@ -134,20 +156,13 @@ TEXT: [What they said]
       };
     });
 
-    // Get analysis for each question
-    const analysisPromises = questions.map(async (question) => {
-      try {
-        const prompt = `Based on this transcription: "${transcription}", please provide a detailed analysis for the following question. Format important points with HTML emphasis tags (<em>) for emphasis and strong tags (<strong>) for key findings: ${question}`;
-        const result = await retryWithBackoff(() => model.generateContent(prompt));
-        const response = await result.response;
-        return response.text();
-      } catch (error) {
-        console.error(`Analysis error for question "${question}":`, error);
-        return `Unable to analyze this aspect. Please try again.`;
-      }
+    // Process questions sequentially with delay between each
+    const analysis = await processSequentially(questions, async (question) => {
+      const prompt = `Based on this transcription: "${transcription}", please provide a detailed analysis for the following question. Format important points with HTML emphasis tags (<em>) for emphasis and strong tags (<strong>) for key findings: ${question}`;
+      const result = await retryWithBackoff(() => model.generateContent(prompt));
+      const response = await result.response;
+      return response.text();
     });
-
-    const analysis = await Promise.all(analysisPromises);
 
     return {
       summary,

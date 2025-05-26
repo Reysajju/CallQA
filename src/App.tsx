@@ -28,6 +28,10 @@ function App() {
     chat: true
   });
 
+  const createMarkup = (content: string) => {
+    return { __html: content };
+  };
+
   useEffect(() => {
     const savedTranscriptions = localStorage.getItem('transcriptions');
     if (savedTranscriptions) {
@@ -344,9 +348,10 @@ function App() {
                     </div>
                     {expandedSections['summary'] && (
                       <div className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-6">
-                        <div className="prose prose-blue dark:prose-invert max-w-none">
-                          {selectedItem.summary || 'No summary available.'}
-                        </div>
+                        <div 
+                          className="prose prose-blue dark:prose-invert max-w-none"
+                          dangerouslySetInnerHTML={createMarkup(selectedItem.summary || 'No summary available.')}
+                        />
                       </div>
                     )}
                   </div>
@@ -378,7 +383,7 @@ function App() {
                                 <span className="font-medium">{entry.speaker}</span>
                                 <span className="text-sm opacity-75">{entry.timestamp}</span>
                               </div>
-                              <p>{entry.text}</p>
+                              <div dangerouslySetInnerHTML={createMarkup(entry.text)} />
                             </div>
                           </div>
                         ))}
@@ -411,16 +416,19 @@ function App() {
                                   <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-3">
                                     {heading.replace(/\*\*/g, '')}
                                   </h3>
-                                  <div className="text-gray-700 dark:text-gray-300">
-                                    {content.join('\n')}
-                                  </div>
+                                  <div 
+                                    className="text-gray-700 dark:text-gray-300"
+                                    dangerouslySetInnerHTML={createMarkup(content.join('\n'))}
+                                  />
                                 </div>
                               );
                             }
                             return (
-                              <p key={index} className="text-gray-700 dark:text-gray-300">
-                                {section}
-                              </p>
+                              <div 
+                                key={index} 
+                                className="text-gray-700 dark:text-gray-300"
+                                dangerouslySetInnerHTML={createMarkup(section)}
+                              />
                             );
                           })}
                         </div>
@@ -448,9 +456,7 @@ function App() {
                           <div key={index} className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-6">
                             <div 
                               className="prose prose-blue dark:prose-invert max-w-none"
-                              dangerouslySetInnerHTML={{ 
-                                __html: answer
-                              }}
+                              dangerouslySetInnerHTML={createMarkup(answer)}
                             />
                           </div>
                         ))}
@@ -535,3 +541,5 @@ function App() {
 }
 
 export default App;
+
+export default App

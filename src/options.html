@@ -3,10 +3,120 @@
 <head>
   <meta charset="UTF-8">
   <title>Gemini Call Analyzer Settings</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f5f5f5;
+      min-width: 400px;
+    }
+    .container {
+      background: white;
+      padding: 24px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 24px;
+      border-bottom: 2px solid #0078d7;
+      padding-bottom: 8px;
+    }
+    .section {
+      margin-bottom: 24px;
+    }
+    .section h3 {
+      color: #0078d7;
+      margin-bottom: 12px;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      margin-bottom: 4px;
+      font-weight: 500;
+      color: #333;
+    }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    input[type="text"]:focus, input[type="password"]:focus {
+      outline: none;
+      border-color: #0078d7;
+      box-shadow: 0 0 0 2px rgba(0, 120, 215, 0.2);
+    }
+    .btn {
+      background: #0078d7;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .btn:hover {
+      background: #005fa3;
+    }
+    .btn.success {
+      background: #107c10;
+    }
+    .help-text {
+      font-size: 12px;
+      color: #666;
+      margin-top: 4px;
+    }
+    .status {
+      padding: 8px 12px;
+      border-radius: 4px;
+      margin-top: 8px;
+      display: none;
+    }
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+  </style>
 </head>
 <body>
-  <h2>Settings (Coming Soon)</h2>
-  <div>Preset questions and API key input will be available here.</div>
+  <div class="container">
+    <h1>Gemini Call Analyzer Settings</h1>
+    
+    <div class="section">
+      <h3>API Configuration</h3>
+      <div class="form-group">
+        <label for="apiKey">Gemini API Key</label>
+        <input type="password" id="apiKey" placeholder="Enter your Gemini API key">
+        <div class="help-text">
+          Get your API key from <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a>
+        </div>
+      </div>
+      <button id="saveApiKey" class="btn">Save API Key</button>
+      <div id="apiKeyStatus" class="status"></div>
+    </div>
+
+    <div class="section">
+      <h3>Preset Questions</h3>
+      <div id="questionsList"></div>
+      <button id="addQuestion" class="btn">Add Question</button>
+      <button id="saveQuestions" class="btn">Save Questions</button>
+      <div id="questionsStatus" class="status"></div>
+    </div>
+  </div>
+
   <script src="options.js"></script>
 </body>
 </html>

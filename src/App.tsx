@@ -1,14 +1,28 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { FileAudio, Upload, FileText, Trash2, Phone, ChevronDown, ChevronUp, Clock, AlertCircle, Settings } from 'lucide-react';
+import { FileAudio, Upload, FileText, Trash2, Phone, ChevronDown, ChevronUp, Clock, AlertCircle, Settings, Download, Upload as UploadIcon } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
-import { transcribeAudio, analyzeTranscription, chatWithTranscription } from './lib/gemini';
+import { transcribeAudio, processSelectedFeatures, chatWithTranscription } from './lib/gemini';
 import { LoadingSpinner } from './components/LoadingSpinner';
-import { TranscriptionItem } from './types';
+import { ProcessingOptions } from './components/ProcessingOptions';
+import { TranscriptionItem, ProcessingOptions as ProcessingOptionsType } from './types';
 import { ThemeToggle } from './components/ThemeToggle';
+import { 
+  loadTranscriptions, 
+  saveTranscriptions, 
+  loadSettings, 
+  saveSettings, 
+  addTranscription, 
+  deleteTranscription as removeTranscription,
+  updateTranscription,
+  exportData,
+  importData,
+  clearAllData
+} from './lib/storage';
 import toast from 'react-hot-toast';
 
 function App() {
   const [file, setFile] = useState<File | null>(null);
+  const [fileInfo, setFileInfo] = useState<{ name: string; size: string; duration?: string } | null>(null);
   const [transcriptions, setTranscriptions] = useState<TranscriptionItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingStage, setLoadingStage] = useState<string>('');
@@ -20,11 +34,14 @@ function App() {
   const [chatHistory, setChatHistory] = useState<{ question: string; answer: string }[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [presetQuestions, setPresetQuestions] = useState<string[]>([
-    'What are the main topics discussed?',
-    'What are the key action items?',
-    'Were there any deadlines mentioned?'
-  ]);
+  const [settings, setSettings] = useState(loadSettings());
+  const [processingOptions, setProcessingOptions] = useState<ProcessingOptionsType>({
+    summary: true,
+    timestampedTranscription: true,
+    transcription: true,
+    analysis: true,
+    chat: true
+  });
   const [expandedSections, setExpandedSections] = useState<{ [key: string]: boolean }>({
     recentFiles: true,
     transcription: true,
@@ -36,17 +53,18 @@ function App() {
   });
 
   useEffect(() => {
-    const savedTranscriptions = localStorage.getItem('transcriptions');
-    if (savedTranscriptions) {
-      setTranscriptions(JSON.parse(savedTranscriptions));
-    }
-
-    // Load saved preset questions
-    const savedQuestions = localStorage.getItem('presetQuestions');
-    if (savedQuestions) {
-      setPresetQuestions(JSON.parse(savedQuestions));
-    }
+    setTranscriptions(loadTranscriptions());
   }, []);
+
+  // Clean up blob URLs when component unmounts
+  useEffect(() => {
+    return () => {
+      if (file) {
+        const url = URL.createObjectURL(file);
+        URL.revokeObjectURL(url);
+      }
+    };
+  }, [file]);
 
   const createMarkup = (content: string) => {
     return { __html: content };
@@ -59,24 +77,54 @@ function App() {
     }));
   };
 
-  const saveToLocalStorage = (items: TranscriptionItem[]) => {
-    localStorage.setItem('transcriptions', JSON.stringify(items));
-    setTranscriptions(items);
+  const getAudioDuration = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const audio = document.createElement('audio');
+      const url = URL.createObjectURL(file);
+      
+      audio.addEventListener('loadedmetadata', () => {
+        const duration = audio.duration;
+        const minutes = Math.floor(duration / 60);
+        const seconds = Math.floor(duration % 60);
+        const formattedDuration = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        URL.revokeObjectURL(url);
+        resolve(formattedDuration);
+      });
+
+      audio.addEventListener('error', () => {
+        URL.revokeObjectURL(url);
+        resolve('Unknown');
+      });
+
+      audio.src = url;
+    });
   };
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles[0]) {
-      setFile(acceptedFiles[0]);
+      const selectedFile = acceptedFiles[0];
+      setFile(selectedFile);
       setError(null);
+      
+      // Get file info
+      const sizeInMB = (selectedFile.size / (1024 * 1024)).toFixed(2);
+      const duration = await getAudioDuration(selectedFile);
+      
+      setFileInfo({
+        name: selectedFile.name,
+        size: `${sizeInMB} MB`,
+        duration: duration !== 'Unknown' ? duration : undefined
+      });
     }
   }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
-      'audio/*': ['.mp3', '.wav', '.m4a', '.ogg']
+      'audio/*': ['.mp3', '.wav', '.m4a', '.ogg', '.aac', '.flac']
     },
-    maxFiles: 1
+    maxFiles: 1,
+    maxSize: 500 * 1024 * 1024 // 500MB limit
   });
 
   const updateProgress = (stage: string, progress: number) => {
@@ -86,59 +134,94 @@ function App() {
   };
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (!file || !fileInfo) return;
+
+    const selectedCount = Object.values(processingOptions).filter(Boolean).length;
+    if (selectedCount === 0) {
+      toast.error('Please select at least one processing option');
+      return;
+    }
 
     try {
-      const audio = new Audio(URL.createObjectURL(file));
-      await new Promise((resolve) => {
-        audio.addEventListener('loadedmetadata', resolve);
-      });
-      
-      const durationMinutes = Math.ceil(audio.duration / 60);
-
       setLoading(true);
       setError(null);
       setChatHistory([]);
       
       updateProgress('Preparing audio file', 0);
-      const reader = new FileReader();
+      
+      // Convert file to base64 more safely
       const audioContent = await new Promise<string>((resolve, reject) => {
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (reader.result && typeof reader.result === 'string') {
+            resolve(reader.result);
+          } else {
+            reject(new Error('Failed to read file'));
+          }
+        };
+        reader.onerror = () => reject(new Error('File reading failed'));
         reader.readAsDataURL(file);
       });
+      
       updateProgress('Preparing audio file', 100);
 
+      let transcription = '';
+      let duration = fileInfo.duration || '00:00:00';
+
+      // Always get basic transcription first if any feature is selected
       updateProgress('Transcribing audio', 0);
-      const transcription = await transcribeAudio(audioContent);
+      const rawTranscription = await transcribeAudio(audioContent);
       updateProgress('Transcribing audio', 100);
       
-      const durationMatch = transcription.match(/DURATION: (\d{2}:\d{2}:\d{2})/);
-      const duration = durationMatch ? durationMatch[1] : '00:00:00';
-      
-      const cleanTranscription = transcription.replace(/DURATION: \d{2}:\d{2}:\d{2}\n\n/, '');
-      
-      updateProgress('Analyzing content', 0);
-      const analysisResults = await analyzeTranscription(cleanTranscription, presetQuestions);
-      updateProgress('Analyzing content', 100);
+      // Extract duration from transcription if available
+      const durationMatch = rawTranscription.match(/DURATION: (\d{2}:\d{2}:\d{2})/);
+      if (durationMatch) {
+        duration = durationMatch[1];
+      }
+      transcription = rawTranscription.replace(/DURATION: \d{2}:\d{2}:\d{2}\n\n/, '');
+
+      // Process selected features with the processing options
+      updateProgress('Processing selected features', 0);
+      console.log('Processing with options:', processingOptions);
+      const results = await processSelectedFeatures(
+        transcription, 
+        processingOptions, 
+        settings.presetQuestions
+      );
+      updateProgress('Processing selected features', 100);
+
+      console.log('Processing results:', results);
 
       const newTranscription: TranscriptionItem = {
         id: Date.now().toString(),
-        fileName: file.name,
-        transcription: cleanTranscription,
-        summary: analysisResults.summary || 'No summary available.',
-        timestampedTranscription: analysisResults.timestampedTranscription || [],
-        analysis: analysisResults.analysis || [],
+        fileName: fileInfo.name,
+        transcription: processingOptions.transcription ? (results.transcription || transcription) : (transcription || ''), // Always store some transcription for chat
+        summary: processingOptions.summary ? results.summary : undefined,
+        timestampedTranscription: processingOptions.timestampedTranscription ? results.timestampedTranscription : undefined,
+        analysis: processingOptions.analysis ? results.analysis : undefined,
         date: new Date().toLocaleString(),
         duration: duration,
-        fileSize: `${(file.size / (1024 * 1024)).toFixed(2)} MB`
+        fileSize: fileInfo.size,
+        processedFeatures: processingOptions
       };
 
-      const updatedTranscriptions = [newTranscription, ...transcriptions];
-      saveToLocalStorage(updatedTranscriptions);
+      console.log('Created transcription item:', {
+        hasTranscription: !!newTranscription.transcription,
+        hasSummary: !!newTranscription.summary,
+        hasTimestamped: !!newTranscription.timestampedTranscription,
+        hasAnalysis: !!newTranscription.analysis,
+        processedFeatures: newTranscription.processedFeatures
+      });
+
+      addTranscription(newTranscription);
+      setTranscriptions(loadTranscriptions());
       setSelectedItem(newTranscription);
       
-      toast.success('Audio processed successfully!');
+      toast.success(`Audio processed successfully! ${selectedCount} features completed.`);
+      
+      // Clear file and file info
+      setFile(null);
+      setFileInfo(null);
       
       setTimeout(() => {
         setLoading(false);
@@ -149,13 +232,12 @@ function App() {
       console.error('Error processing file:', error);
       setError(error instanceof Error ? error.message : 'An unexpected error occurred. Please try again.');
       toast.error('Failed to process audio file');
-    } finally {
-      setFile(null);
+      setLoading(false);
     }
   };
 
   const handleChatSubmit = async () => {
-    if (!chatMessage.trim() || !selectedItem) return;
+    if (!chatMessage.trim() || !selectedItem || !selectedItem.transcription) return;
 
     const question = chatMessage.trim();
     setChatMessage('');
@@ -172,8 +254,8 @@ function App() {
   };
 
   const deleteTranscription = (id: string) => {
-    const updatedTranscriptions = transcriptions.filter(t => t.id !== id);
-    saveToLocalStorage(updatedTranscriptions);
+    removeTranscription(id);
+    setTranscriptions(loadTranscriptions());
     if (selectedItem?.id === id) {
       setSelectedItem(null);
     }
@@ -181,23 +263,94 @@ function App() {
   };
 
   const addPresetQuestion = () => {
-    const newQuestions = [...presetQuestions, ''];
-    setPresetQuestions(newQuestions);
-    localStorage.setItem('presetQuestions', JSON.stringify(newQuestions));
+    const newSettings = {
+      ...settings,
+      presetQuestions: [...settings.presetQuestions, '']
+    };
+    setSettings(newSettings);
+    saveSettings(newSettings);
   };
 
   const updatePresetQuestion = (index: number, value: string) => {
-    const newQuestions = [...presetQuestions];
-    newQuestions[index] = value;
-    setPresetQuestions(newQuestions);
-    localStorage.setItem('presetQuestions', JSON.stringify(newQuestions));
+    const newSettings = {
+      ...settings,
+      presetQuestions: settings.presetQuestions.map((q, i) => i === index ? value : q)
+    };
+    setSettings(newSettings);
+    saveSettings(newSettings);
   };
 
   const removePresetQuestion = (index: number) => {
-    const newQuestions = presetQuestions.filter((_, i) => i !== index);
-    setPresetQuestions(newQuestions);
-    localStorage.setItem('presetQuestions', JSON.stringify(newQuestions));
+    const newSettings = {
+      ...settings,
+      presetQuestions: settings.presetQuestions.filter((_, i) => i !== index)
+    };
+    setSettings(newSettings);
+    saveSettings(newSettings);
   };
+
+  const handleExportData = () => {
+    try {
+      const data = exportData();
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `callqa-export-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success('Data exported successfully');
+    } catch (error) {
+      toast.error('Failed to export data');
+    }
+  };
+
+  const handleImportData = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        if (importData(content)) {
+          setTranscriptions(loadTranscriptions());
+          setSettings(loadSettings());
+          toast.success('Data imported successfully');
+        } else {
+          toast.error('Failed to import data - invalid format');
+        }
+      } catch (error) {
+        toast.error('Failed to import data');
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+  };
+
+  const handleClearAllData = () => {
+    if (window.confirm('Are you sure you want to clear all data? This action cannot be undone.')) {
+      clearAllData();
+      setTranscriptions([]);
+      setSelectedItem(null);
+      setSettings(loadSettings());
+      toast.success('All data cleared');
+    }
+  };
+
+  const clearSelectedFile = () => {
+    setFile(null);
+    setFileInfo(null);
+    setError(null);
+  };
+
+  const selectedCount = Object.values(processingOptions).filter(Boolean).length;
+
+  // Check if chat should be available - either chat was processed OR we have transcription data
+  const isChatAvailable = selectedItem && selectedItem.transcription && 
+    (selectedItem.processedFeatures?.chat || selectedItem.transcription);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-violet-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
@@ -235,11 +388,11 @@ function App() {
               </button>
             </div>
             
-            <div className="space-y-6">
+            <div className="space-y-8">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Preset Analysis Questions</h3>
                 <div className="space-y-3">
-                  {presetQuestions.map((question, index) => (
+                  {settings.presetQuestions.map((question, index) => (
                     <div key={index} className="flex items-center gap-2">
                       <input
                         type="text"
@@ -264,6 +417,41 @@ function App() {
                   Add Question
                 </button>
               </div>
+
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Data Management</h3>
+                <div className="flex flex-wrap gap-4">
+                  <button
+                    onClick={handleExportData}
+                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export Data
+                  </button>
+                  
+                  <label className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer">
+                    <UploadIcon className="w-4 h-4" />
+                    Import Data
+                    <input
+                      type="file"
+                      accept=".json"
+                      onChange={handleImportData}
+                      className="hidden"
+                    />
+                  </label>
+                  
+                  <button
+                    onClick={handleClearAllData}
+                    className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Clear All Data
+                  </button>
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                  Export your data for backup or import previously exported data. All data is stored locally in your browser.
+                </p>
+              </div>
             </div>
           </div>
         ) : (
@@ -286,6 +474,9 @@ function App() {
                     <p className="text-sm text-gray-600 dark:text-gray-300">
                       {isDragActive ? 'Drop the file here' : 'Drop audio file or click to upload'}
                     </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Supports MP3, WAV, M4A, OGG, AAC, FLAC (max 500MB)
+                    </p>
                   </div>
                 </div>
 
@@ -296,19 +487,40 @@ function App() {
                   </div>
                 )}
 
-                {file && !loading && (
-                  <div className="mt-3 flex items-center justify-between bg-blue-50 dark:bg-blue-900/20 p-2 rounded-lg">
-                    <div className="flex items-center gap-2 text-sm">
-                      <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                      <span className="font-medium text-blue-700 dark:text-blue-300 truncate">{file.name}</span>
+                {fileInfo && !loading && (
+                  <div className="mt-3 space-y-3">
+                    <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2 text-sm">
+                          <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                          <span className="font-medium text-blue-700 dark:text-blue-300 truncate">{fileInfo.name}</span>
+                        </div>
+                        <button
+                          onClick={clearSelectedFile}
+                          className="text-gray-500 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <div className="flex gap-4 text-xs text-gray-600 dark:text-gray-400">
+                        <span>Size: {fileInfo.size}</span>
+                        {fileInfo.duration && <span>Duration: {fileInfo.duration}</span>}
+                      </div>
                     </div>
+                    
+                    <ProcessingOptions
+                      options={processingOptions}
+                      onChange={setProcessingOptions}
+                      disabled={loading}
+                    />
+                    
                     <button
                       onClick={handleUpload}
-                      disabled={loading}
-                      className="px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1"
+                      disabled={loading || selectedCount === 0}
+                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
-                      <Upload className="w-3 h-3" />
-                      Process
+                      <Upload className="w-4 h-4" />
+                      Process Selected Features ({selectedCount})
                     </button>
                   </div>
                 )}
@@ -395,196 +607,206 @@ function App() {
                   </div>
 
                   <div className="space-y-6">
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Summary</h3>
-                        <button
-                          onClick={() => toggleSection('summary')}
-                          className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                        >
-                          {expandedSections['summary'] ? (
-                            <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-                          ) : (
-                            <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-                          )}
-                        </button>
-                      </div>
-                      {expandedSections['summary'] && (
-                        <div className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-6">
-                          <div 
-                            className="prose prose-blue dark:prose-invert max-w-none"
-                            dangerouslySetInnerHTML={createMarkup(selectedItem.summary || 'No summary available.')}
-                          />
+                    {selectedItem.summary && (
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Summary</h3>
+                          <button
+                            onClick={() => toggleSection('summary')}
+                            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                          >
+                            {expandedSections['summary'] ? (
+                              <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                            ) : (
+                              <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                            )}
+                          </button>
                         </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Timestamped Transcription</h3>
-                        <button
-                          onClick={() => toggleSection('timestampedTranscription')}
-                          className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                        >
-                          {expandedSections['timestampedTranscription'] ? (
-                            <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-                          ) : (
-                            <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-                          )}
-                        </button>
-                      </div>
-                      {expandedSections['timestampedTranscription'] && (
-                        <div className="space-y-4">
-                          {selectedItem.timestampedTranscription?.map((entry, index) => (
-                            <div key={index} className={`flex ${entry.speaker === 'Speaker A' ? 'justify-end' : 'justify-start'}`}>
-                              <div className={`max-w-[80%] rounded-lg p-4 ${
-                                entry.speaker === 'Speaker A' 
-                                  ? 'bg-blue-500 dark:bg-blue-600 text-white' 
-                                  : 'bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600'
-                              }`}>
-                                <div className="flex items-center gap-2 mb-2">
-                                  <span className="font-medium">{entry.speaker}</span>
-                                  <span className="text-sm opacity-75">{entry.timestamp}</span>
-                                </div>
-                                <div dangerouslySetInnerHTML={createMarkup(entry.text)} />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Transcription</h3>
-                        <button
-                          onClick={() => toggleSection('transcription')}
-                          className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                        >
-                          {expandedSections['transcription'] ? (
-                            <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-                          ) : (
-                            <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-                          )}
-                        </button>
-                      </div>
-                      {expandedSections['transcription'] && (
-                        <div className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-6">
-                          <div className="prose prose-blue dark:prose-invert max-w-none space-y-6">
-                            {selectedItem.transcription.split('\n\n').map((section, index) => {
-                              if (section.startsWith('**')) {
-                                const [heading, ...content] = section.split('\n');
-                                return (
-                                  <div key={index} className="mb-6">
-                                    <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-3">
-                                      {heading.replace(/\*\*/g, '')}
-                                    </h3>
-                                    <div 
-                                      className="text-gray-700 dark:text-gray-300"
-                                      dangerouslySetInnerHTML={createMarkup(content.join('\n'))}
-                                    />
-                                  </div>
-                                );
-                              }
-                              return (
-                                <div 
-                                  key={index} 
-                                  className="text-gray-700 dark:text-gray-300"
-                                  dangerouslySetInnerHTML={createMarkup(section)}
-                                />
-                              );
-                            })}
+                        {expandedSections['summary'] && (
+                          <div className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-6">
+                            <div 
+                              className="prose prose-blue dark:prose-invert max-w-none"
+                              dangerouslySetInnerHTML={createMarkup(selectedItem.summary)}
+                            />
                           </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Analysis</h3>
-                        <button
-                          onClick={() => toggleSection('analysis')}
-                          className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                        >
-                          {expandedSections['analysis'] ? (
-                            <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-                          ) : (
-                            <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-                          )}
-                        </button>
+                        )}
                       </div>
-                      {expandedSections['analysis'] && (
-                        <div className="grid gap-4 md:grid-cols-2">
-                          {selectedItem.analysis.map((answer, index) => (
-                            <div key={index} className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-6">
-                              <div 
-                                className="prose prose-blue dark:prose-invert max-w-none"
-                                dangerouslySetInnerHTML={createMarkup(answer)}
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                    )}
 
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Chat</h3>
-                        <button
-                          onClick={() => toggleSection('chat')}
-                          className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                        >
-                          {expandedSections['chat'] ? (
-                            <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-                          ) : (
-                            <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-                          )}
-                        </button>
-                      </div>
-                      {expandedSections['chat'] && (
-                        <div className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-6">
-                          <div className="space-y-4 mb-4 max-h-96 overflow-y-auto">
-                            {chatHistory.map((chat, index) => (
-                              <div key={index} className="space-y-2">
-                                <div className="bg-blue-100 dark:bg-blue-900/40 p-3 rounded-lg">
-                                  <p className="font-medium text-blue-900 dark:text-blue-100">{chat.question}</p>
-                                </div>
-                                <div className="bg-white dark:bg-gray-800 p-3 rounded-lg">
-                                  <p className="text-gray-700 dark:text-gray-300">{chat.answer}</p>
+                    {selectedItem.timestampedTranscription && selectedItem.timestampedTranscription.length > 0 && (
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Timestamped Transcription</h3>
+                          <button
+                            onClick={() => toggleSection('timestampedTranscription')}
+                            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                          >
+                            {expandedSections['timestampedTranscription'] ? (
+                              <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                            ) : (
+                              <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                            )}
+                          </button>
+                        </div>
+                        {expandedSections['timestampedTranscription'] && (
+                          <div className="space-y-4">
+                            {selectedItem.timestampedTranscription.map((entry, index) => (
+                              <div key={index} className={`flex ${entry.speaker === 'Speaker A' ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[80%] rounded-lg p-4 ${
+                                  entry.speaker === 'Speaker A' 
+                                    ? 'bg-blue-500 dark:bg-blue-600 text-white' 
+                                    : 'bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600'
+                                }`}>
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className="font-medium">{entry.speaker}</span>
+                                    <span className="text-sm opacity-75">{entry.timestamp}</span>
+                                  </div>
+                                  <div dangerouslySetInnerHTML={createMarkup(entry.text)} />
                                 </div>
                               </div>
                             ))}
-                            {chatLoading && (
-                              <div className="flex justify-center">
-                                <div className="w-8 h-8 border-4 border-blue-200 dark:border-blue-800 rounded-full animate-spin border-t-blue-600 dark:border-t-blue-400"></div>
-                              </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {selectedItem.transcription && selectedItem.processedFeatures?.transcription && (
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Transcription</h3>
+                          <button
+                            onClick={() => toggleSection('transcription')}
+                            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                          >
+                            {expandedSections['transcription'] ? (
+                              <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                            ) : (
+                              <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-300" />
                             )}
-                          </div>
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              value={chatMessage}
-                              onChange={(e) => setChatMessage(e.target.value)}
-                              placeholder="Ask about the call..."
-                              className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                              onKeyPress={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                  e.preventDefault();
-                                  handleChatSubmit();
-                                }
-                              }}
-                            />
-                            <button
-                              onClick={handleChatSubmit}
-                              disabled={chatLoading || !chatMessage.trim()}
-                              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-                            >
-                              Send
-                            </button>
-                          </div>
+                          </button>
                         </div>
-                      )}
-                    </div>
+                        {expandedSections['transcription'] && (
+                          <div className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-6">
+                            <div className="prose prose-blue dark:prose-invert max-w-none space-y-6">
+                              {selectedItem.transcription.split('\n\n').map((section, index) => {
+                                if (section.startsWith('**')) {
+                                  const [heading, ...content] = section.split('\n');
+                                  return (
+                                    <div key={index} className="mb-6">
+                                      <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-3">
+                                        {heading.replace(/\*\*/g, '')}
+                                      </h3>
+                                      <div 
+                                        className="text-gray-700 dark:text-gray-300"
+                                        dangerouslySetInnerHTML={createMarkup(content.join('\n'))}
+                                      />
+                                    </div>
+                                  );
+                                }
+                                return (
+                                  <div 
+                                    key={index} 
+                                    className="text-gray-700 dark:text-gray-300"
+                                    dangerouslySetInnerHTML={createMarkup(section)}
+                                  />
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {selectedItem.analysis && selectedItem.analysis.length > 0 && (
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Analysis</h3>
+                          <button
+                            onClick={() => toggleSection('analysis')}
+                            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                          >
+                            {expandedSections['analysis'] ? (
+                              <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                            ) : (
+                              <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                            )}
+                          </button>
+                        </div>
+                        {expandedSections['analysis'] && (
+                          <div className="grid gap-4 md:grid-cols-2">
+                            {selectedItem.analysis.map((answer, index) => (
+                              <div key={index} className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-6">
+                                <div 
+                                  className="prose prose-blue dark:prose-invert max-w-none"
+                                  dangerouslySetInnerHTML={createMarkup(answer)}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {isChatAvailable && (
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Chat</h3>
+                          <button
+                            onClick={() => toggleSection('chat')}
+                            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                          >
+                            {expandedSections['chat'] ? (
+                              <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                            ) : (
+                              <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                            )}
+                          </button>
+                        </div>
+                        {expandedSections['chat'] && (
+                          <div className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-6">
+                            <div className="space-y-4 mb-4 max-h-96 overflow-y-auto">
+                              {chatHistory.map((chat, index) => (
+                                <div key={index} className="space-y-2">
+                                  <div className="bg-blue-100 dark:bg-blue-900/40 p-3 rounded-lg">
+                                    <p className="font-medium text-blue-900 dark:text-blue-100">{chat.question}</p>
+                                  </div>
+                                  <div className="bg-white dark:bg-gray-800 p-3 rounded-lg">
+                                    <p className="text-gray-700 dark:text-gray-300">{chat.answer}</p>
+                                  </div>
+                                </div>
+                              ))}
+                              {chatLoading && (
+                                <div className="flex justify-center">
+                                  <div className="w-8 h-8 border-4 border-blue-200 dark:border-blue-800 rounded-full animate-spin border-t-blue-600 dark:border-t-blue-400"></div>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                value={chatMessage}
+                                onChange={(e) => setChatMessage(e.target.value)}
+                                placeholder="Ask about the call..."
+                                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                                onKeyPress={(e) => {
+                                  if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    handleChatSubmit();
+                                  }
+                                }}
+                              />
+                              <button
+                                onClick={handleChatSubmit}
+                                disabled={chatLoading || !chatMessage.trim()}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                              >
+                                Send
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (

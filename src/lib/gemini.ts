@@ -14,7 +14,7 @@ const genAI = new GoogleGenerativeAI(getApiKey());
 
 export async function transcribeAudio(audioContent: string): Promise<string> {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     
     const prompt = `Please transcribe this audio content and provide a structured output with clear section headings. Follow these guidelines:
 

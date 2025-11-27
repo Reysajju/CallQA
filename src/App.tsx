@@ -18,6 +18,7 @@ import {
   importData,
   clearAllData
 } from './lib/storage';
+import { formatFriendlyContent } from './lib/textFormatter';
 import toast from 'react-hot-toast';
 
 function App() {
@@ -66,8 +67,8 @@ function App() {
     };
   }, [file]);
 
-  const createMarkup = (content: string) => {
-    return { __html: content };
+  const createMarkup = (content?: string) => {
+    return { __html: formatFriendlyContent(content ?? '') };
   };
 
   const toggleSection = (sectionId: string) => {
@@ -653,17 +654,21 @@ function App() {
                             {selectedItem.timestampedTranscription.map((entry, index) => (
                               <div key={index} className={`flex ${entry.speaker === 'Speaker A' ? 'justify-end' : 'justify-start'}`}>
                                 <div className={`max-w-[80%] rounded-lg p-4 ${
-                                  entry.speaker === 'Speaker A' 
-                                    ? 'bg-blue-500 dark:bg-blue-600 text-white' 
+                                  entry.speaker === 'Speaker A'
+                                    ? 'bg-blue-500 dark:bg-blue-600 text-white'
                                     : 'bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600'
                                 }`}>
                                   <div className="flex items-center gap-2 mb-2">
                                     <span className="font-medium">{entry.speaker}</span>
                                     <span className="text-sm opacity-75">{entry.timestamp}</span>
                                   </div>
-                                  <div dangerouslySetInnerHTML={createMarkup(entry.text)} />
+                                  <div
+                                    className="text-sm leading-relaxed [&_p]:mt-2 [&_p:first-child]:mt-0 [&_ul]:mt-2 [&_li]:ml-4 [&_li]:list-disc"
+                                    dangerouslySetInnerHTML={createMarkup(entry.text)}
+                                  />
                                 </div>
                               </div>
+
                             ))}
                           </div>
                         )}
@@ -771,7 +776,10 @@ function App() {
                                     <p className="font-medium text-blue-900 dark:text-blue-100">{chat.question}</p>
                                   </div>
                                   <div className="bg-white dark:bg-gray-800 p-3 rounded-lg">
-                                    <p className="text-gray-700 dark:text-gray-300">{chat.answer}</p>
+                                    <div
+                                      className="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300"
+                                      dangerouslySetInnerHTML={createMarkup(chat.answer)}
+                                    />
                                   </div>
                                 </div>
                               ))}
